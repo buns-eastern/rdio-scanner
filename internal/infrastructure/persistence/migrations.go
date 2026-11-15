@@ -51,6 +51,14 @@ type Progress func(level, message string)
 // gone, so reportMigrationDamage reads what is left at the end of the startup
 // pass, before the server starts answering from it.
 func Migrate(ctx context.Context, db *sql.DB, dialect Dialect, clock ports.Clock, progress Progress) error {
+	return MigrateWithAudioFiles(ctx, db, dialect, clock, progress, nil)
+}
+
+// MigrateWithAudioFiles is Migrate for a server that keeps call recordings as files: the calls
+// table gains its audio path column, and the calls a legacy database carries have their
+// recordings written into the audio folder instead of into the new rows. A nil audio folder is
+// exactly Migrate.
+func MigrateWithAudioFiles(ctx context.Context, db *sql.DB, dialect Dialect, clock ports.Clock, progress Progress, audio *AudioFiles) error {
 	if progress == nil {
 		progress = func(_, _ string) {}
 	}
@@ -68,6 +76,7 @@ func Migrate(ctx context.Context, db *sql.DB, dialect Dialect, clock ports.Clock
 
 	s := newStore(db, dialect)
 	s.clock = clock
+	s.audio = audio
 
 	// The log table is brought up to the shape this server writes before anything reads or moves a row:
 	// the column that names the part of the server that wrote each entry, and the indexes the log search
@@ -82,6 +91,13 @@ func Migrate(ctx context.Context, db *sql.DB, dialect Dialect, clock ports.Clock
 	// that means never measured, so no row needs a length the migration cannot know.
 	if err := ensureCallAudioLengthColumn(ctx, s); err != nil {
 		return operationError("database", "migrate", err)
+	}
+
+	// A server that keeps recordings as files needs the column that says where each one is.
+	if s.audio != nil {
+		if err := ensureCallAudioPathColumn(ctx, s); err != nil {
+			return operationError("database", "migrate", err)
+		}
 	}
 
 	// And the calls table gets its search index the same way: the copied statement
@@ -2400,7 +2416,31 @@ func migrateCalls(ctx context.Context, s store, progress Progress) error {
 
 		query = `INSERT INTO "calls" ("callId", "audio", "audioFilename", "audioMime", "siteRef", "systemId", "talkgroupId", "timestamp") VALUES (?, ?, ?, ?, 0, ?, ?, ?)`
 
-		if _, err := tx.exec(ctx, query, int64(callID.Int32), []byte(audio.String), filename, mime, systems[systemRef.Int32], talkgroups[systemRef.Int32][talkgroupRef.Int32], dateTime.Time.UnixMilli()); err != nil {
+		args := []any{int64(callID.Int32), []byte(audio.String), filename, mime, systems[systemRef.Int32], talkgroups[systemRef.Int32][talkgroupRef.Int32], dateTime.Time.UnixMilli()}
+
+		// With an audio folder the recording is written out as a file, named by the call's
+		// identity, and the new row keeps only its path. A file a failed earlier pass left
+		// behind is simply written again under the same name.
+		if s.audio != nil {
+			rel, err := s.audio.Write(uint64(callID.Int32), dateTime.Time, filename, mime, []byte(audio.String))
+			if err != nil {
+				reportFailure(progress, part, section, operation, err, query)
+
+				if err := arch.skip(int64(callID.Int32), named, "its audio file could not be written", original); err != nil {
+					tx.rollback()
+
+					return err
+				}
+
+				continue
+			}
+
+			query = `INSERT INTO "calls" ("callId", "audio", "audioFilename", "audioMime", "siteRef", "systemId", "talkgroupId", "timestamp", "audioPath") VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)`
+			args[1] = []byte{}
+			args = append(args, rel)
+		}
+
+		if _, err := tx.exec(ctx, query, args...); err != nil {
 			reportFailure(progress, part, section, operation, err, query)
 
 			if err := arch.skip(int64(callID.Int32), named, "the database refused it", original); err != nil {

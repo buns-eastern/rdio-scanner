@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/ini.v1"
@@ -40,6 +41,7 @@ const (
 )
 
 const (
+	defaultAudioDir         = "audio"
 	defaultConfigFile       = "rdio-scanner.ini"
 	defaultDbFile           = "rdio-scanner.db"
 	defaultDbHost           = "localhost"
@@ -114,6 +116,7 @@ func newConfig(args []string, exePath string, stdout io.Writer) (*Config, Config
 	}
 
 	fs.StringVar(&config.BaseDir, "base_dir", config.BaseDir, "base directory where all data will be written")
+	fs.StringVar(&config.AudioDir, "audio_dir", defaultAudioDir, "folder call recordings are kept in as files, relative to the base directory; empty keeps them in the database")
 	fs.StringVar(&config.ConfigFile, "config", defaultConfigFile, "server config file")
 	fs.StringVar(&config.DbFile, "db_file", defaultDbFile, "sqlite database file")
 	fs.StringVar(&config.DbHost, "db_host", defaultDbHost, "database host ip or hostname")
@@ -256,6 +259,12 @@ func (config *Config) applyIniFile() error {
 	}
 
 	section := cfg.Section("")
+
+	// audio_dir is read even when empty: an empty value is how the file says the recordings
+	// stay in the database.
+	if section.HasKey("audio_dir") {
+		config.AudioDir = strings.TrimSpace(section.Key("audio_dir").String())
+	}
 
 	overlayString(section, "db_file", &config.DbFile)
 	overlayString(section, "db_host", &config.DbHost)
@@ -416,6 +425,11 @@ func (config *Config) saveConfig() error {
 
 	if config.BcryptCost != defaultBcryptCost {
 		ini = append(ini, fmt.Sprintf("bcrypt_cost = %d", config.BcryptCost))
+	}
+
+	// The audio folder is saved only when it differs from its default.
+	if config.AudioDir != defaultAudioDir {
+		ini = append(ini, fmt.Sprintf("audio_dir = %s", config.AudioDir))
 	}
 
 	// The ini holds the database password, so it is created readable and

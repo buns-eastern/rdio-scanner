@@ -171,6 +171,7 @@ func serve(config *Config, stdout io.Writer) int {
 func serverConfig(config *Config, out io.Writer, echo app.LogEcho) app.Config {
 	return app.Config{
 		BaseDir:     config.BaseDir,
+		AudioDir:    config.AudioDir,
 		DbType:      config.DbType,
 		DbFile:      config.DbFile,
 		DbHost:      config.DbHost,

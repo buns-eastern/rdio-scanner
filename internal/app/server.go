@@ -71,6 +71,10 @@ type Server struct {
 	db      *sql.DB
 	dialect persistence.Dialect
 
+	// audio is the folder call recordings are kept in as files, nil when they stay in the
+	// database.
+	audio *persistence.AudioFiles
+
 	// dbLock is the claim this process holds on the deployment while its
 	// database is open. It is taken before the database is opened and
 	// released after the database is closed, so nothing else can open the
@@ -241,7 +245,11 @@ func New(config Config) (*Server, error) {
 
 	migrationLines := []domain.LogEntry{}
 
-	if err := persistence.Migrate(ctx, db, dialect, srv.clock, func(level, message string) {
+	// Recordings are kept as files when an audio folder is configured; the migration then
+	// gives the calls table its path column and writes a legacy database's recordings out.
+	srv.audio = persistence.NewAudioFiles(config.GetAudioDirPath())
+
+	if err := persistence.MigrateWithAudioFiles(ctx, db, dialect, srv.clock, func(level, message string) {
 		// Said through the copy this server says its lines through, in the shape every other
 		// line has, so the word an operator greps for finds this line wherever the server was
 		// told to say what it has to say. It is not the echo of an entry: there is no entry
@@ -249,7 +257,7 @@ func New(config Config) (*Server, error) {
 		srv.echoTarget().Echo(level, domain.LogSourceDatabase, message)
 
 		migrationLines = append(migrationLines, domain.LogEntry{Level: level, Message: message})
-	}); err != nil {
+	}, srv.audio); err != nil {
 		_ = lock.Close()
 		return nil, err
 	}
@@ -277,6 +285,7 @@ func (s *Server) wire(migrationLines []domain.LogEntry) error {
 	accesses := persistence.NewAccesses(s.db, s.dialect)
 	apikeys := persistence.NewApikeys(s.db, s.dialect)
 	calls := persistence.NewCalls(s.db, s.dialect)
+	calls.UseAudioFiles(s.audio)
 	delayed := persistence.NewDelayedCalls(s.db, s.dialect)
 	dirwatches := persistence.NewDirwatches(s.db, s.dialect)
 	downstreams := persistence.NewDownstreams(s.db, s.dialect)

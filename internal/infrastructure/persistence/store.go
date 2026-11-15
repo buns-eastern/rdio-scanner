@@ -39,6 +39,10 @@ type store struct {
 	// adapter leaves it nil: they store the instants their callers hand them, and only the migration
 	// stamps anything itself.
 	clock ports.Clock
+
+	// audio, when set, is the folder call recordings are kept in as files; the calls row then
+	// holds only the file's path. Nil keeps the recordings inside the calls row.
+	audio *AudioFiles
 }
 
 func newStore(db *sql.DB, dialect Dialect) store {

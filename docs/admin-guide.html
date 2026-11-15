@@ -1154,6 +1154,7 @@ disagree.</p>
     <thead><tr><th scope="col">Flag</th><th scope="col">Default</th><th scope="col">What it decides</th></tr></thead>
     <tbody>
       <tr><td><code>-admin_password</code></td><td class="default">none</td><td>Hash and store this password for the administrator, and stop without starting a server. The one flag that changes the credential from the command line. See <a href="#ch-18-command-line-client">the command line client</a>.</td></tr>
+      <tr><td><code>-audio_dir</code></td><td class="default"><code>audio</code></td><td>The folder each call's recording is kept in as a file, relative to the base directory unless absolute. Files are laid out one folder per day, <code>YYYY/MM/DD/&lt;call id&gt;.&lt;ext&gt;</code>, and the calls table holds only each file's path. An empty value keeps recordings inside the database. Back this folder up with the database.</td></tr>
       <tr><td><code>-base_dir</code></td><td class="default">the executable's folder, else <code>~/Rdio Scanner</code>, else the folder the server was started in</td><td>Where the database file, the configuration file, and the server's state are written. Must be writable.</td></tr>
       <tr><td><code>-bcrypt_cost</code></td><td class="default"><code>10</code></td><td>The bcrypt cost the administrator credential is hashed at, 10 to 14. A cost outside that range is refused at start-up.</td></tr>
       <tr><td><code>-config</code></td><td class="default"><code>rdio-scanner.ini</code></td><td>The name of the configuration file, read from the base directory.</td></tr>
@@ -4633,6 +4634,7 @@ $ psql -h 10.0.0.5 -U rdio rdio_scanner &lt; /backup/rdio-scanner-2026-10-02.sql
     <thead><tr><th scope="col">Flag</th><th scope="col">Default</th><th scope="col">What it sets</th></tr></thead>
     <tbody>
       <tr><td><code>-admin_password &lt;password&gt;</code></td><td class="default">—</td><td>Stores a new administrator password in the deployment's database and stops. <a href="#ch-18-command-line-client">18</a></td></tr>
+      <tr><td><code>-audio_dir &lt;dir&gt;</code></td><td class="default"><code>audio</code></td><td>Where call recordings are kept as files; empty keeps them in the database. <a href="#ch-06-flags-and-ini">6</a></td></tr>
       <tr><td><code>-base_dir &lt;dir&gt;</code></td><td class="default">the program's folder, then <code>~/Rdio Scanner</code>, then the folder the server was started in</td><td>Where every file the deployment writes goes. <a href="#ch-05-first-run">5</a></td></tr>
       <tr><td><code>-bcrypt_cost &lt;10-14&gt;</code></td><td class="default"><code>10</code></td><td>The cost the administrator credential is hashed at. A cost outside the range stops the server. <a href="#ch-22-security-hardening">22</a></td></tr>
       <tr><td><code>-cmd &lt;action&gt;</code></td><td class="default">—</td><td>Drives a running server as a client. <a href="#ch-18-command-line-client">18</a></td></tr>

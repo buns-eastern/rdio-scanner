@@ -49,6 +49,10 @@ var ErrInUse = errors.New("the database is in use")
 type Config struct {
 	BaseDir string
 
+	// AudioDir is the folder call recordings are kept in as files, relative to the base
+	// directory unless absolute. Empty keeps the recordings inside the database.
+	AudioDir string
+
 	DbType     string
 	DbFile     string
 	DbHost     string
@@ -103,6 +107,21 @@ func (config *Config) GetPath(p string) string {
 	}
 
 	return filepath.Join(config.BaseDir, p)
+}
+
+// GetAudioDirPath returns the absolute path of the audio folder, or the empty string when
+// recordings stay in the database.
+func (config *Config) GetAudioDirPath() string {
+	if config.AudioDir == "" {
+		return ""
+	}
+
+	// filepath, not path: a Windows folder such as D:\audio is absolute too.
+	if filepath.IsAbs(config.AudioDir) {
+		return config.AudioDir
+	}
+
+	return config.GetPath(config.AudioDir)
 }
 
 // GetDbFilePath returns the absolute path of the sqlite database file.

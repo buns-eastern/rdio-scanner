@@ -46,6 +46,11 @@ func NewCalls(db *sql.DB, dialect Dialect) *Calls {
 	return &Calls{store: newStore(db, dialect)}
 }
 
+// UseAudioFiles makes the repository keep call recordings as files in the given folder.
+// The migration pass must have run with the same folder, so the calls table has its audio
+// path column. Calls whose recording is still inside the row keep playing from the row.
+func (calls *Calls) UseAudioFiles(audio *AudioFiles) { calls.store.audio = audio }
+
 // OnWarn sets the listener that hears about stored values the read had to clamp.
 // The server wires it at startup to file the line as a warning in the log view.
 func (calls *Calls) OnWarn(report func(message string)) { calls.warn = report }
@@ -102,9 +107,15 @@ func readCall(ctx context.Context, tx transaction, id uint64) (domain.Call, []st
 	// Only the references, labels, and delays the call payload and the re-arm
 	// rule need are joined in; the rest of the two aggregates belongs to the
 	// configuration repositories.
-	const query = `SELECT c."audio", c."audioFilename", c."audioMime", c."audioLength", c."siteRef", c."timestamp", c."systemId", c."talkgroupId", s."systemRef", t."talkgroupRef", t."label", t."name", s."delay", t."delay" FROM "calls" AS c LEFT JOIN "systems" AS s ON s."systemId" = c."systemId" LEFT JOIN "talkgroups" AS t ON t."talkgroupId" = c."talkgroupId" WHERE c."callId" = ?`
+	query := `SELECT c."audio", c."audioFilename", c."audioMime", c."audioLength", c."siteRef", c."timestamp", c."systemId", c."talkgroupId", s."systemRef", t."talkgroupRef", t."label", t."name", s."delay", t."delay" FROM "calls" AS c LEFT JOIN "systems" AS s ON s."systemId" = c."systemId" LEFT JOIN "talkgroups" AS t ON t."talkgroupId" = c."talkgroupId" WHERE c."callId" = ?`
+
+	// With an audio folder the row also says where its recording file is.
+	if tx.store.audio != nil {
+		query = strings.Replace(query, `c."audio", `, `c."audio", c."audioPath", `, 1)
+	}
 
 	var (
+		audioPath      string
 		audio          []byte
 		filename       string
 		mime           string
@@ -124,7 +135,13 @@ func readCall(ctx context.Context, tx transaction, id uint64) (domain.Call, []st
 	// The identity goes back to SQL signed: an upgraded legacy history can hold a
 	// call identifier with the high bit set, and the driver refuses an unsigned
 	// bind; the stored bit pattern is what names the row.
-	err := tx.queryRow(ctx, query, int64(id)).Scan(&audio, &filename, &mime, &audioLength, &siteRef, &timestamp, &systemID, &talkgroupID, &systemRef, &talkgroupRef, &talkgroupLabel, &talkgroupName, &systemDelay, &talkgroupDelay)
+	dest := []any{&audio, &filename, &mime, &audioLength, &siteRef, &timestamp, &systemID, &talkgroupID, &systemRef, &talkgroupRef, &talkgroupLabel, &talkgroupName, &systemDelay, &talkgroupDelay}
+
+	if tx.store.audio != nil {
+		dest = append([]any{&audio, &audioPath}, dest[1:]...)
+	}
+
+	err := tx.queryRow(ctx, query, int64(id)).Scan(dest...)
 
 	if errors.Is(err, sql.ErrNoRows) {
 		// The legacy server does not stop here: it falls through its own no-rows result with
@@ -136,6 +153,17 @@ func readCall(ctx context.Context, tx transaction, id uint64) (domain.Call, []st
 
 	if err != nil {
 		return domain.Call{}, nil, statementError("calls", "getcall", err, query)
+	}
+
+	// A recording kept as a file is read from the audio folder; an empty path means the
+	// recording is still in the row.
+	if audioPath != "" {
+		data, err := tx.store.audio.Read(audioPath)
+		if err != nil {
+			return domain.Call{}, nil, operationError("calls", "getcall", fmt.Errorf("call %d: %w", id, err))
+		}
+
+		audio = data
 	}
 
 	call := domain.NewCall()
@@ -333,17 +361,25 @@ func (calls *Calls) SaveCall(ctx context.Context, call domain.Call) (domain.Call
 
 	id := call.ID
 
+	// With an audio folder the row is written without its recording, which goes to a file
+	// once the row has its identity, the identity being the file's name.
+	rowAudio := call.Audio
+
+	if calls.audio != nil {
+		rowAudio = []byte{}
+	}
+
 	if calls.dialect == DialectPostgresql {
 		query := insertCall + ` RETURNING "callId"`
 
-		err := tx.queryRow(ctx, query, call.Audio, call.AudioFilename, nanosecondsOf(call.AudioLength), call.AudioMime, call.SiteRef, call.System.ID, call.Talkgroup.ID, millisOf(call.Timestamp)).Scan(&id)
+		err := tx.queryRow(ctx, query, rowAudio, call.AudioFilename, nanosecondsOf(call.AudioLength), call.AudioMime, call.SiteRef, call.System.ID, call.Talkgroup.ID, millisOf(call.Timestamp)).Scan(&id)
 		if err != nil {
 			tx.rollback()
 			return domain.Call{}, statementError("calls", "writecall", err, query)
 		}
 
 	} else {
-		res, err := tx.exec(ctx, insertCall, call.Audio, call.AudioFilename, nanosecondsOf(call.AudioLength), call.AudioMime, call.SiteRef, call.System.ID, call.Talkgroup.ID, millisOf(call.Timestamp))
+		res, err := tx.exec(ctx, insertCall, rowAudio, call.AudioFilename, nanosecondsOf(call.AudioLength), call.AudioMime, call.SiteRef, call.System.ID, call.Talkgroup.ID, millisOf(call.Timestamp))
 		if err != nil {
 			tx.rollback()
 			return domain.Call{}, statementError("calls", "writecall", err, insertCall)
@@ -358,23 +394,52 @@ func (calls *Calls) SaveCall(ctx context.Context, call domain.Call) (domain.Call
 		id = uint64(assigned)
 	}
 
-	if err := writeCallFrequencies(ctx, tx, id, call.Frequencies); err != nil {
+	audioPath := ""
+
+	if calls.audio != nil {
+		rel, err := calls.audio.Write(id, call.Timestamp, call.AudioFilename, call.AudioMime, call.Audio)
+		if err != nil {
+			tx.rollback()
+			return domain.Call{}, operationError("calls", "writecall", err)
+		}
+
+		audioPath = rel
+
+		const setPath = `UPDATE "calls" SET "audioPath" = ? WHERE "callId" = ?`
+
+		if _, err := tx.exec(ctx, setPath, rel, int64(id)); err != nil {
+			tx.rollback()
+			calls.audio.Remove(rel)
+			return domain.Call{}, statementError("calls", "writecall", err, setPath)
+		}
+	}
+
+	// A file written for a row that is then rolled back is removed with it.
+	abandon := func() {
 		tx.rollback()
+
+		if audioPath != "" {
+			calls.audio.Remove(audioPath)
+		}
+	}
+
+	if err := writeCallFrequencies(ctx, tx, id, call.Frequencies); err != nil {
+		abandon()
 		return domain.Call{}, err
 	}
 
 	if err := writeCallPatches(ctx, tx, call, id); err != nil {
-		tx.rollback()
+		abandon()
 		return domain.Call{}, err
 	}
 
 	if err := writeCallUnits(ctx, tx, id, call.Units); err != nil {
-		tx.rollback()
+		abandon()
 		return domain.Call{}, err
 	}
 
 	if err := tx.commit(); err != nil {
-		tx.rollback()
+		abandon()
 		return domain.Call{}, operationError("calls", "writecall", err)
 	}
 
@@ -798,6 +863,16 @@ func (calls *Calls) DeleteCallsBefore(ctx context.Context, before time.Time) (in
 	removed, err := res.RowsAffected()
 	if err != nil {
 		return 0, operationError("calls", "prune", err)
+	}
+
+	// The recording files go by whole days: a day folder is removed once the whole day is
+	// older than the cutoff, so a file whose row was just deleted in a partly-kept day goes
+	// with its day on a later pass. A folder that cannot be removed is reported, and the rows
+	// stay deleted.
+	if calls.audio != nil {
+		if _, err := calls.audio.RemoveDaysBefore(before); err != nil && calls.warn != nil {
+			calls.warn(fmt.Sprintf("calls.prune: %v", err))
+		}
 	}
 
 	return int(removed), nil
