@@ -558,7 +558,12 @@ class RdioPaginator extends HTMLElement {
         button.textContent = glyph;
       }
 
-      button.addEventListener('click', paginatorMove(this, name));
+      const move = paginatorMove(this, name);
+
+      // a locked paginator answers no control, even one a script clicks.
+      button.addEventListener('click', () => {
+        if (!this.locked) move();
+      });
       dom[name] = button;
       parts.push(button);
     }
@@ -610,6 +615,16 @@ class RdioPaginator extends HTMLElement {
     this.render();
   }
 
+  // A locked paginator moves nowhere: every control is unavailable until it
+  // is unlocked, the way the legacy paginator was disabled while the list it
+  // pages could not follow it.
+  setLocked(locked) {
+    if (this.locked === !!locked) return;
+
+    this.locked = !!locked;
+    this.render();
+  }
+
   firstPage() {
     if (this.pageIndex !== 0) {
       this.setAttribute('page-index', '0');
@@ -637,11 +652,13 @@ class RdioPaginator extends HTMLElement {
 
     label.textContent = this.material ? this.rangeLabel() : `Page ${this.pageIndex + 1} of ${pages}`;
 
-    if (first) first.disabled = atFirst;
-    if (last) last.disabled = atLast;
+    const locked = !!this.locked;
 
-    prev.disabled = atFirst;
-    next.disabled = atLast;
+    if (first) first.disabled = locked || atFirst;
+    if (last) last.disabled = locked || atLast;
+
+    prev.disabled = locked || atFirst;
+    next.disabled = locked || atLast;
   }
 }
 

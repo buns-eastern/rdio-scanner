@@ -300,6 +300,15 @@ class RdioSearchPanel extends HTMLElement {
 
     // Reset is part of the form the search is holding: a control that answers nothing has to say so.
     this.resetButton.setAttribute('aria-disabled', String(pending));
+
+    // the page controls rest while the list cannot follow them, as the
+    // legacy paginator did: a search in flight answers with the window it
+    // asked for, and a call playing from the list holds the list, so the
+    // panel asks for no other window until the playback stops. a page
+    // moved meanwhile would read rows from a window it does not show.
+    const { useCases } = getAppContext();
+
+    this.paginator.setLocked(pending || useCases.livefeedMode === 'playback');
   }
 
   filterControls() {

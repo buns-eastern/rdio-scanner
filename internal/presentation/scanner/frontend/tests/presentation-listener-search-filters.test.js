@@ -456,3 +456,88 @@ describe('the search screen — the dates the date field accepts', () => {
     assert.equal(panel.form.elements.date.max, '2026-10-06T11:40', 'the bound did not follow the filter the operator chose');
   });
 });
+
+// the listener's mode as the search panel reads it. a call started from the list puts the listener in
+// playback, and the list it plays from is the one on screen; the test stands the mode in for the use
+// cases' own, and every screen starts offline.
+let listenerMode = 'offline';
+
+Object.defineProperty(getAppContext().useCases, 'livefeedMode', { configurable: true, get: () => listenerMode });
+
+function enterMode(mode) {
+  listenerMode = mode;
+
+  getAppContext().store.setState({ livefeedMode: mode });
+}
+
+function pageControls(panel) {
+  return ['First page', 'Previous page', 'Next page', 'Last page'].map((label) => pageControl(panel, label));
+}
+
+describe('the search screen — the page controls rest while the list cannot follow them', () => {
+  it('makes every page control unavailable while a search is in flight', () => {
+    enterMode('offline');
+
+    const { panel } = searchScreen({ answers: false });
+
+    answeredWindow(windowOf(200), 500);
+
+    pick(panel, 'system', 'County');
+
+    for (const control of pageControls(panel)) {
+      assert.equal(control.disabled, true, `${control.getAttribute('aria-label')} stayed available over a search in flight`);
+    }
+  });
+
+  it('gives the page controls back when the answer arrives', () => {
+    enterMode('offline');
+
+    const { panel } = searchScreen({ answers: false });
+
+    answeredWindow(windowOf(200), 500);
+
+    assert.equal(pageControl(panel, 'Next page').disabled, false, 'the next page stayed unavailable after the answer');
+    assert.equal(pageControl(panel, 'Last page').disabled, false, 'the last page stayed unavailable after the answer');
+  });
+
+  it('holds the page while a call from the list is playing, so the rows and the range stay the same page', () => {
+    enterMode('offline');
+
+    const { panel, sent } = searchScreen({ answers: false });
+
+    answeredWindow(windowOf(200), 500);
+
+    enterMode('playback');
+
+    const asked = sent.length;
+    const shown = rows(panel).map((row) => column(row, 0));
+
+    for (const control of pageControls(panel)) {
+      assert.equal(control.disabled, true, `${control.getAttribute('aria-label')} stayed available while a call from the list played`);
+    }
+
+    pageControl(panel, 'Last page').click();
+    pageControl(panel, 'Next page').click();
+
+    assert.equal(paginator(panel).pageIndex, 0, 'the range moved to a page the list it shows does not hold');
+    assert.equal(sent.length, asked, 'a page move during playback asked the server for a list of its own');
+    assert.deepEqual(rows(panel).map((row) => column(row, 0)), shown, 'the rows changed under a page that did not move');
+
+    enterMode('offline');
+  });
+
+  it('pages again once the playback stops', () => {
+    enterMode('offline');
+
+    const { panel } = searchScreen({ answers: false });
+
+    answeredWindow(windowOf(200), 500);
+
+    enterMode('playback');
+    enterMode('offline');
+
+    pageControl(panel, 'Next page').click();
+
+    assert.equal(paginator(panel).pageIndex, 1, 'the list stayed on its page after the playback stopped');
+  });
+});
