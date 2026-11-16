@@ -87,6 +87,7 @@ class RdioSearchPanel extends HTMLElement {
         this.resultsPending = false;
       }
 
+      this.followPlayback();
       this.refreshFilters();
       this.refreshResults();
       this.renderProgress();
@@ -220,7 +221,9 @@ class RdioSearchPanel extends HTMLElement {
       return;
     }
 
-    if (list && needsRefetch(from, list.options?.offset ?? 0, SERVER_PAGE)) {
+    // a call playing from the list holds the list: the playback fetches the
+    // windows it walks into itself, and the page follows the call into them.
+    if (list && useCases.livefeedMode !== 'playback' && needsRefetch(from, list.options?.offset ?? 0, SERVER_PAGE)) {
       this.searchCalls();
     } else {
       this.renderResults();
@@ -315,6 +318,27 @@ class RdioSearchPanel extends HTMLElement {
     return FILTER_CONTROLS.map((name) => this.form.elements[name]);
   }
 
+  // the page follows the call the playback moved on to, as the legacy list
+  // did: a playback that walks off the page the operator is reading turns
+  // the page with it, so the call playing is always the row that can stop it.
+  followPlayback() {
+    const { store, useCases } = getAppContext();
+    const { call, playbackList: list } = store.getState();
+
+    if (call?.id === this.followedCallId) return;
+
+    this.followedCallId = call?.id;
+
+    if (!call || useCases.livefeedMode !== 'playback' || !list?.results) return;
+
+    const at = list.results.findIndex((row) => row?.id === call.id);
+
+    if (at < 0) return;
+
+    this.paginator.setLength(list.count);
+    this.paginator.setPage(Math.floor(((list.options?.offset ?? 0) + at) / CLIENT_PAGE));
+  }
+
   rowClick(ev) {
     const { useCases } = getAppContext();
 
@@ -324,7 +348,12 @@ class RdioSearchPanel extends HTMLElement {
 
     if (button.dataset.play) useCases.loadAndPlay(Number(button.dataset.play));
     else if (button.dataset.download) useCases.download(Number(button.dataset.download));
-    else if (button.dataset.stop) useCases.stop();
+    // stopping the call that plays from the list ends the playback, as the
+    // legacy list's stop did, and gives the page controls back.
+    else if (button.dataset.stop) {
+      if (useCases.livefeedMode === 'playback') useCases.stopPlaybackMode();
+      else useCases.stop();
+    }
   }
 }
 

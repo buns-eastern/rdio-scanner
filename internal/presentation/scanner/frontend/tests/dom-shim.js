@@ -559,6 +559,12 @@ function parseHTML(html) {
 }
 
 function matches(node, selector) {
+  // A selector list — `button[data-play],button[data-stop]` — names a node any one of its
+  // selectors names, the way a browser reads the comma.
+  if (selector.includes(',')) {
+    return selector.split(',').some((part) => part.trim() !== '' && matches(node, part));
+  }
+
   // A descendant selector — `.auth form`, `.history tbody` — names the control by the panel it sits
   // in: the node answers the last part, one of its ancestors answers the part before it.
   const parts = selector.trim().split(/\s+/);

@@ -541,3 +541,97 @@ describe('the search screen — the page controls rest while the list cannot fol
     assert.equal(paginator(panel).pageIndex, 1, 'the list stayed on its page after the playback stopped');
   });
 });
+
+// the window the server answered with, starting where the playback walked to.
+function answeredWindowAt(offset, window, count) {
+  getAppContext().store.setState({
+    playbackList: { count, options: { limit: 200, offset, sort: -1 }, results: window },
+    playbackListSeq: getAppContext().store.getState().playbackListSeq + 1,
+  });
+}
+
+function playing(id) {
+  getAppContext().store.setState({ call: { id } });
+}
+
+function controlOf(row) {
+  return findAll(row, (node) => node.tag === 'button')[0];
+}
+
+describe('the search screen — the page follows the call playing from the list', () => {
+  it('turns to the page of the call the playback moved on to', () => {
+    enterMode('offline');
+
+    const { panel } = searchScreen({ answers: false });
+
+    answeredWindow(windowOf(200), 500);
+
+    enterMode('playback');
+
+    playing(200 + 35);
+
+    assert.equal(paginator(panel).pageIndex, 3, 'the list stayed on a page the playing call is not on');
+
+    const stop = rows(panel).map(controlOf).find((control) => control?.getAttribute('aria-label') === 'Stop');
+
+    assert.ok(stop, 'no row on the page shows the stop control of the call playing');
+    assert.equal(stop.dataset.stop, String(200 + 35));
+
+    enterMode('offline');
+  });
+
+  it('follows the playback into the window it walked into', () => {
+    enterMode('offline');
+
+    const { panel } = searchScreen({ answers: false });
+
+    answeredWindow(windowOf(200), 500);
+
+    enterMode('playback');
+
+    answeredWindowAt(200, windowOf(200), 500);
+
+    playing(200 + 5);
+
+    assert.equal(paginator(panel).pageIndex, 20, 'the list did not follow the playback into the next window');
+    assert.ok(rows(panel).some((row) => controlOf(row)?.dataset.stop === String(200 + 5)), 'the page shows rows other than the window the call plays from');
+
+    enterMode('offline');
+  });
+
+  it('ends the playback when the operator stops the call playing from the list', () => {
+    enterMode('offline');
+
+    const { panel } = searchScreen({ answers: false });
+
+    answeredWindow(windowOf(200), 500);
+
+    const useCases = getAppContext().useCases;
+    const stopPlaybackMode = useCases.stopPlaybackMode;
+    const stop = useCases.stop;
+    const asked = [];
+
+    useCases.stopPlaybackMode = () => {
+      asked.push('playback');
+      enterMode('offline');
+    };
+    useCases.stop = () => asked.push('call');
+
+    try {
+      enterMode('playback');
+
+      playing(200 + 2);
+
+      const control = rows(panel).map(controlOf).find((button) => button?.dataset.stop === String(200 + 2));
+
+      control.click();
+
+      assert.deepEqual(asked, ['playback'], 'stop ended the call and left the list holding the playback');
+      assert.equal(pageControl(panel, 'Next page').disabled, false, 'the page controls stayed unavailable after the playback stopped');
+    } finally {
+      useCases.stopPlaybackMode = stopPlaybackMode;
+      useCases.stop = stop;
+      getAppContext().store.setState({ call: undefined });
+    }
+  });
+});
