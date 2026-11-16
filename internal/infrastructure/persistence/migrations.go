@@ -2279,6 +2279,44 @@ func migrateCalls(ctx context.Context, s store, progress Progress) error {
 	arch := archiving(ctx, tx, progress, "rdioScannerCalls", "call", "calls")
 	guard := &callRowGuard{tx: tx, arch: arch, on: s.dialect == DialectPostgresql}
 
+	// PostgreSQL plans a statement it runs repeatedly once and reuses that plan, and it planned
+	// against the calls table as it stood when the stage began: empty. Every per-call statement
+	// that reads the table, including the foreign key checks behind each frequency and unit row,
+	// then read all of it, so each call cost more than the last. Planning each run afresh lets
+	// the planner see the table as it grows.
+	if s.dialect == DialectPostgresql {
+		const plain = `SET LOCAL plan_cache_mode = force_custom_plan`
+
+		if _, err := tx.exec(ctx, plain); err != nil {
+			tx.rollback()
+			return statementError(section, operation, err, plain)
+		}
+	}
+
+	// The calls already carried and the units already known are read once, here, instead of
+	// being asked about call by call: a per-call COUNT over a table this same transaction is
+	// filling was planned by PostgreSQL as a full read of the table, so each call cost more than
+	// the one before and a deployment of millions of calls took days.
+	carriedCalls, err := loadCarriedCallIDs(ctx, tx)
+	if err != nil {
+		tx.rollback()
+		return err
+	}
+
+	knownUnits, err := loadKnownUnits(ctx, tx)
+	if err != nil {
+		tx.rollback()
+		return err
+	}
+
+	// The units a call creates are forgotten again if the guard rolls that call back.
+	unitsThisCall := []unitKey{}
+	guard.onRollback = func() {
+		for _, key := range unitsThisCall {
+			delete(knownUnits, key)
+		}
+	}
+
 	query = `SELECT "id", "audio", "audioName", "audioType", "dateTime", "frequencies", "frequency", "patches", "source", "sources", "system", "talkgroup" FROM "rdioScannerCalls"`
 
 	unread := false
@@ -2350,6 +2388,8 @@ func migrateCalls(ctx context.Context, s store, progress Progress) error {
 
 			return err
 		}
+
+		unitsThisCall = unitsThisCall[:0]
 
 		if !callID.Valid {
 			if err := arch.skip(0, "a call row", "it holds no identity", original); err != nil {
@@ -2423,11 +2463,7 @@ func migrateCalls(ctx context.Context, s store, progress Progress) error {
 			mime = audioType.String
 		}
 
-		if carried, err := alreadyCarried(ctx, tx, "calls", "callId", int64(callID.Int32)); err != nil {
-			tx.rollback()
-
-			return err
-		} else if carried {
+		if _, carried := carriedCalls[int64(callID.Int32)]; carried {
 			continue
 		}
 
@@ -2474,6 +2510,8 @@ func migrateCalls(ctx context.Context, s store, progress Progress) error {
 
 			continue
 		}
+
+		carriedCalls[int64(callID.Int32)] = struct{}{}
 
 		if frequencies.Valid && len(frequencies.String) > 0 {
 			var decoded any
@@ -2583,17 +2621,9 @@ func migrateCalls(ctx context.Context, s store, progress Progress) error {
 			// reported the insert from the branch where it had succeeded — with a nil error its formatter
 			// then dereferenced, which is what took the legacy upgrade down. Repaired rather than
 			// preserved.
-			var count int
+			key := unitKey{systemID: int64(systems[systemRef.Int32]), unitRef: int64(source.Int32)}
 
-			query = `SELECT COUNT(*) FROM "units" WHERE "systemId" = ? AND "unitRef" = ?`
-
-			if err := tx.queryRow(ctx, query, systems[systemRef.Int32], int64(source.Int32)).Scan(&count); err != nil {
-				reportFailure(progress, part, section, operation, err, query)
-
-				continue
-			}
-
-			if count == 0 {
+			if _, known := knownUnits[key]; !known {
 				query = `INSERT INTO "units" ("label", "systemId", "unitRef") VALUES (?, ?, ?)`
 
 				// The label is the number as text, which is what the legacy statement — a number
@@ -2603,6 +2633,9 @@ func migrateCalls(ctx context.Context, s store, progress Progress) error {
 
 					continue
 				}
+
+				knownUnits[key] = struct{}{}
+				unitsThisCall = append(unitsThisCall, key)
 			}
 
 			query = `INSERT INTO "callUnits" ("callId", "offset", "unitRef") VALUES (?, ?, ?)`

@@ -144,4 +144,3 @@ func TestMigrateLiveOnPostgreSQLArchivesACallTheDatabaseRefusesAndCarriesTheRest
 
 	t.Logf("call 9002 archived (%s); %d of the fixture's %d calls carried", reason, carried, len(original))
 }
-

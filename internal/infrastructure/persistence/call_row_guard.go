@@ -36,6 +36,10 @@ type callRowGuard struct {
 	id       int64
 	named    string
 	original map[string]any
+
+	// onRollback, when set, hears that the open call was rolled back, so the stage can forget
+	// what it remembered about that call.
+	onRollback func()
 }
 
 const callRowSavepoint = "v8_call_row"
@@ -85,5 +89,75 @@ func (guard *callRowGuard) close() error {
 		return statementError("migration", "migrateCalls", err, `RELEASE SAVEPOINT `+callRowSavepoint)
 	}
 
+	if guard.onRollback != nil {
+		guard.onRollback()
+	}
+
 	return guard.arch.skip(guard.id, guard.named, "the database refused part of it", guard.original)
+}
+
+// unitKey names a unit the way a call names it: the system's identity and the radio's number.
+type unitKey struct {
+	systemID int64
+	unitRef  int64
+}
+
+// loadCarriedCallIDs reads the identities of the calls already in the version 8 table.
+func loadCarriedCallIDs(ctx context.Context, tx transaction) (map[int64]struct{}, error) {
+	const query = `SELECT "callId" FROM "calls"`
+
+	rows, err := tx.query(ctx, query)
+	if err != nil {
+		return nil, statementError("migration", "migrateCalls", err, query)
+	}
+
+	defer rows.Close()
+
+	carried := map[int64]struct{}{}
+
+	for rows.Next() {
+		var id int64
+
+		if err := rows.Scan(&id); err != nil {
+			return nil, statementError("migration", "migrateCalls", err, query)
+		}
+
+		carried[id] = struct{}{}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, statementError("migration", "migrateCalls", err, query)
+	}
+
+	return carried, nil
+}
+
+// loadKnownUnits reads the units already in the version 8 table, by system and radio number.
+func loadKnownUnits(ctx context.Context, tx transaction) (map[unitKey]struct{}, error) {
+	const query = `SELECT "systemId", "unitRef" FROM "units"`
+
+	rows, err := tx.query(ctx, query)
+	if err != nil {
+		return nil, statementError("migration", "migrateCalls", err, query)
+	}
+
+	defer rows.Close()
+
+	known := map[unitKey]struct{}{}
+
+	for rows.Next() {
+		var key unitKey
+
+		if err := rows.Scan(&key.systemID, &key.unitRef); err != nil {
+			return nil, statementError("migration", "migrateCalls", err, query)
+		}
+
+		known[key] = struct{}{}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, statementError("migration", "migrateCalls", err, query)
+	}
+
+	return known, nil
 }
