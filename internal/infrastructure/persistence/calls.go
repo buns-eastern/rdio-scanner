@@ -541,16 +541,24 @@ func (calls *Calls) SearchCalls(ctx context.Context, search ports.CallSearch) (p
 
 	page.Count = uint(clampNonNegative(count))
 
+	// A page past the middle of the match is read from the other end: an
+	// OFFSET makes the database walk and discard every row before the page,
+	// so the last page of six million calls costs six million rows read one
+	// way and two hundred read the other. The rows come back reversed and are
+	// put back in the order asked for below.
+	ascending, limit, offset, flipped := searchPageWindow(search, page.Count)
+
 	order := "DESC"
-	if search.Ascending {
+	if ascending {
 		order = "ASC"
 	}
 
 	// The page carries summary fields only, never the audio a page of 200
-	// calls would otherwise cost.
-	pageQuery := `SELECT c."callId", c."timestamp", c."audioLength", s."systemRef", t."talkgroupRef" ` + from + ` ORDER BY c."timestamp" ` + order + ` LIMIT ? OFFSET ?`
+	// calls would otherwise cost. The call identity breaks timestamp ties, so
+	// a page reads the same from either end.
+	pageQuery := `SELECT c."callId", c."timestamp", c."audioLength", s."systemRef", t."talkgroupRef" ` + from + ` ORDER BY c."timestamp" ` + order + `, c."callId" ` + order + ` LIMIT ? OFFSET ?`
 
-	rows, err := calls.query(ctx, pageQuery, append(append([]any{}, args...), search.Limit, search.Offset)...)
+	rows, err := calls.query(ctx, pageQuery, append(append([]any{}, args...), limit, offset)...)
 	if err != nil {
 		return ports.CallSearchPage{}, statementError("calls", "search", err, pageQuery)
 	}
@@ -603,9 +611,35 @@ func (calls *Calls) SearchCalls(ctx context.Context, search ports.CallSearch) (p
 		return ports.CallSearchPage{}, operationError("calls", "search", err)
 	}
 
+	if flipped {
+		for i, j := 0, len(page.Results)-1; i < j; i, j = i+1, j-1 {
+			page.Results[i], page.Results[j] = page.Results[j], page.Results[i]
+		}
+	}
+
 	calls.reportClamps(clamped)
 
 	return page, nil
+}
+
+// searchPageWindow answers the sort direction, limit and offset that read the
+// asked-for page with the least rows skipped: a page in the second half of a
+// match of count rows is read in the opposite direction, from the far end,
+// and flipped reports that its rows must be reversed. A page at or past the
+// end of the match is left as asked and comes back empty.
+func searchPageWindow(search ports.CallSearch, count uint) (ascending bool, limit, offset uint, flipped bool) {
+	ascending, limit, offset = search.Ascending, search.Limit, search.Offset
+
+	if limit == 0 || offset >= count || offset <= count/2 {
+		return ascending, limit, offset, false
+	}
+
+	end := offset + limit
+	if end > count || end < offset {
+		end = count
+	}
+
+	return !ascending, end - offset, count - end, true
 }
 
 // readSearchSpan reads one end of the matching history into at; an empty

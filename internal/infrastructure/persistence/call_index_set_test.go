@@ -902,7 +902,7 @@ func historyPageRead() (string, []any) {
 	from := callHistoryFrom + ` WHERE ` + where
 
 	statement := `SELECT c."callId", c."timestamp", c."audioLength", s."systemRef", t."talkgroupRef" ` +
-		from + ` ORDER BY c."timestamp" DESC LIMIT ? OFFSET ?`
+		from + ` ORDER BY c."timestamp" DESC, c."callId" DESC LIMIT ? OFFSET ?`
 
 	return statement, append(append([]any{}, args...), 200, 0)
 }
@@ -1015,8 +1015,8 @@ const (
 
 	inventorySpanOldestTail      = ` ORDER BY c."timestamp" ASC LIMIT 1`
 	inventorySpanNewestTail      = ` ORDER BY c."timestamp" DESC LIMIT 1`
-	inventoryPageTail            = ` ORDER BY c."timestamp" DESC LIMIT ? OFFSET ?`
-	inventoryOldestFirstPageTail = ` ORDER BY c."timestamp" ASC LIMIT ? OFFSET ?`
+	inventoryPageTail            = ` ORDER BY c."timestamp" DESC, c."callId" DESC LIMIT ? OFFSET ?`
+	inventoryOldestFirstPageTail = ` ORDER BY c."timestamp" ASC, c."callId" ASC LIMIT ? OFFSET ?`
 )
 
 // The filter each measured search adds to the ones the history carries on its own, one per search.
