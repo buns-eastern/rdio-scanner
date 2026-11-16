@@ -36,6 +36,10 @@ type Calls struct {
 	// warn tells the operator about a stored value the read had to clamp. The server
 	// wires it to its log; without it the repository clamps silently.
 	warn func(message string)
+
+	// counts keeps how many calls each history search matches. The server turns it on;
+	// without it every search counts its whole match again.
+	counts *searchCountCache
 }
 
 var _ ports.CallRepository = (*Calls)(nil)
@@ -50,6 +54,45 @@ func NewCalls(db *sql.DB, dialect Dialect) *Calls {
 // The migration pass must have run with the same folder, so the calls table has its audio
 // path column. Calls whose recording is still inside the row keep playing from the row.
 func (calls *Calls) UseAudioFiles(audio *AudioFiles) { calls.store.audio = audio }
+
+// UseSearchCounts keeps each history search's count for reuse: answered as it is for
+// fresh, then answered while one background read brings it up to date until stale. The
+// count of the whole history is read in the background at once, so the first listener
+// to open the search does not wait on it either.
+func (calls *Calls) UseSearchCounts(fresh, stale time.Duration) {
+	calls.counts = newSearchCountCache(fresh, stale)
+
+	go func() {
+		ctx, cancel := calls.counts.background()
+		defer cancel()
+
+		where, args := callSearchFilters(ports.CallSearch{})
+
+		_, _ = calls.countSearch(ctx, where, args)
+	}()
+}
+
+// countSearch answers how many calls a history filter matches, from the kept counts
+// when the server keeps them.
+func (calls *Calls) countSearch(ctx context.Context, where string, args []any) (int64, error) {
+	countQuery := `SELECT COUNT(*) ` + callHistoryFrom + ` WHERE ` + where
+
+	load := func(ctx context.Context) (int64, error) {
+		var count int64
+
+		if err := calls.queryRow(ctx, countQuery, args...).Scan(&count); err != nil {
+			return 0, statementError("calls", "search", err, countQuery)
+		}
+
+		return count, nil
+	}
+
+	if calls.counts == nil {
+		return load(ctx)
+	}
+
+	return calls.counts.get(ctx, searchCountKey(where, args), load)
+}
 
 // OnWarn sets the listener that hears about stored values the read had to clamp.
 // The server wires it at startup to file the line as a warning in the log view.
@@ -528,15 +571,12 @@ func (calls *Calls) SearchCalls(ctx context.Context, search ports.CallSearch) (p
 		return ports.CallSearchPage{}, err
 	}
 
-	countQuery := `SELECT COUNT(*) ` + from
-
 	// The count is scanned as a 64-bit integer and clamped, not cast:
 	// page.Count is a uint, and on a 32-bit build a negative value cast
 	// through it is the largest count there is.
-	var count int64
-
-	if err := calls.queryRow(ctx, countQuery, args...).Scan(&count); err != nil {
-		return ports.CallSearchPage{}, statementError("calls", "search", err, countQuery)
+	count, err := calls.countSearch(ctx, where, args)
+	if err != nil {
+		return ports.CallSearchPage{}, err
 	}
 
 	page.Count = uint(clampNonNegative(count))

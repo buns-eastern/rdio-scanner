@@ -286,6 +286,7 @@ func (s *Server) wire(migrationLines []domain.LogEntry) error {
 	apikeys := persistence.NewApikeys(s.db, s.dialect)
 	calls := persistence.NewCalls(s.db, s.dialect)
 	calls.UseAudioFiles(s.audio)
+	calls.UseSearchCounts(15*time.Second, 10*time.Minute)
 	delayed := persistence.NewDelayedCalls(s.db, s.dialect)
 	dirwatches := persistence.NewDirwatches(s.db, s.dialect)
 	downstreams := persistence.NewDownstreams(s.db, s.dialect)
