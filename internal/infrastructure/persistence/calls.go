@@ -25,6 +25,7 @@ import (
 
 	"rdio-scanner/internal/application/ports"
 	"rdio-scanner/internal/domain"
+	"rdio-scanner/internal/infrastructure/cloudstore"
 )
 
 // Calls is the recorded call history: the calls table and its callFrequencies,
@@ -201,7 +202,7 @@ func readCall(ctx context.Context, tx transaction, id uint64) (domain.Call, []st
 	// A recording kept as a file is read from the audio folder; an empty path means the
 	// recording is still in the row.
 	if audioPath != "" {
-		data, err := tx.store.audio.Read(audioPath)
+		data, err := tx.store.audio.ReadContext(ctx, audioPath)
 		if err != nil {
 			return domain.Call{}, nil, operationError("calls", "getcall", fmt.Errorf("call %d: %w", id, err))
 		}
@@ -946,6 +947,11 @@ func (calls *Calls) DeleteCallsBefore(ctx context.Context, before time.Time) (in
 	if calls.audio != nil {
 		if _, err := calls.audio.RemoveDaysBefore(before); err != nil && calls.warn != nil {
 			calls.warn(fmt.Sprintf("calls.prune: %v", err))
+		}
+
+		// Recordings moved to cloud storage go by the same whole days, from the bucket.
+		if _, _, err := calls.audio.RemoveCloudDaysBefore(ctx, before); err != nil && calls.warn != nil {
+			calls.warn(fmt.Sprintf("audio storage: could not prune cloud storage: %s", cloudstore.Reason(err)))
 		}
 	}
 

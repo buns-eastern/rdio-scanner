@@ -75,6 +75,10 @@ type Server struct {
 	// database.
 	audio *persistence.AudioFiles
 
+	// audioStorage moves older recordings from the audio folder to a cloud bucket once a
+	// night, when the operator turns it on; nil when the recordings stay in the database.
+	audioStorage *persistence.AudioStorage
+
 	// dbLock is the claim this process holds on the deployment while its
 	// database is open. It is taken before the database is opened and
 	// released after the database is closed, so nothing else can open the
@@ -333,6 +337,37 @@ func (s *Server) wire(migrationLines []domain.LogEntry) error {
 		})
 	}
 
+	if s.audio != nil {
+		storageLog := func(warn bool, message string) {
+			level := domain.LogLevelInfo
+
+			if warn {
+				level = domain.LogLevelWarn
+			}
+
+			_ = logs.AppendLog(ctx, domain.LogEntry{
+				DateTime: s.clock.Now(),
+				Level:    level,
+				Source:   domain.LogSourceServer,
+				Message:  message,
+			})
+		}
+
+		s.audioStorage = persistence.NewAudioStorage(s.db, s.dialect, s.audio, func(ctx context.Context) (uint, error) {
+			current, err := options.ReadOptions(ctx)
+
+			return current.PruneDays, err
+		}, storageLog)
+
+		if err := s.audioStorage.Load(ctx); err != nil {
+			storageLog(true, fmt.Sprintf("audio storage: could not read its settings: %v", err))
+		}
+
+		s.audio.OnCloudReadFailure(func(rel string, err error) {
+			storageLog(true, fmt.Sprintf("audio storage: could not read recording %s from cloud storage", rel))
+		})
+	}
+
 	accesses.OnWarn(clampWarning)
 	apikeys.OnWarn(clampWarning)
 	calls.OnWarn(clampWarning)
@@ -509,6 +544,8 @@ func (s *Server) wire(migrationLines []domain.LogEntry) error {
 
 		Version: s.config.Version,
 		Trusted: s.trusted,
+
+		AudioStorage: s.adminAudioStorage(),
 	})
 
 	uploads := upload.New(upload.Deps{
@@ -673,6 +710,10 @@ func (s *Server) Start(ctx context.Context) error {
 
 	s.pruning = pruneHourly(s.scheduler, s.prune)
 
+	if s.audioStorage != nil {
+		s.audioStorage.Start()
+	}
+
 	watches, err := s.repos.Dirwatches.AllDirwatches(ctx)
 	if err != nil {
 		return err
@@ -752,6 +793,10 @@ func (s *Server) stop(ctx context.Context) {
 
 		if s.pruning != nil {
 			s.pruning.Cancel()
+		}
+
+		if s.audioStorage != nil {
+			s.audioStorage.Stop()
 		}
 
 		if s.held != nil {
@@ -1100,4 +1145,14 @@ func hostname() string {
 	}
 
 	return name
+}
+
+// adminAudioStorage is the audio storage for the administrator's endpoints, or nil when the
+// recordings stay in the database: a nil pointer inside the interface would read as present.
+func (s *Server) adminAudioStorage() adminbackend.AudioStorage {
+	if s.audioStorage == nil {
+		return nil
+	}
+
+	return adminAudioStorage{storage: s.audioStorage}
 }

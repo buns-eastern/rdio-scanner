@@ -1472,6 +1472,7 @@ bcrypt_cost = 12</code></pre>
       <tr><td>API Keys</td><td>The keys a recorder posts calls with, and a downstream presents.</td><td><a href="#ch-09-access-and-api-keys">9</a></td></tr>
       <tr><td>Access</td><td>Listener access codes: who may listen, to which systems and talkgroups, until when.</td><td><a href="#ch-09-access-and-api-keys">9</a></td></tr>
       <tr><td>Options</td><td>The server's behaviour options.</td><td><a href="#ch-13-options">13</a></td></tr>
+      <tr><td>Audio storage</td><td>Where recordings are kept: recent days on the local disk, older ones in a cloud bucket.</td><td><a href="#ch-13-options">13</a></td></tr>
       <tr><td>Logs</td><td>The server's own log, filtered and paged.</td><td><a href="#ch-14-logs">14</a></td></tr>
       <tr><td>Tools</td><td>Export and import the configuration, import talkgroups and units from CSV, change the password.</td><td><a href="#ch-15-tools">15</a></td></tr>
       <tr><td>OpenAPI</td><td>Every endpoint the server answers, read from the contract the server publishes.</td><td><a href="#ch-16-rest-api">16</a></td></tr>
@@ -2605,6 +2606,33 @@ rm -f ${basename}.*</code></pre>
     <a href="#ch-23-backup-and-restore">chapter 23</a> covers the backup math,
     and <a href="#ch-25-troubleshooting">chapter 25</a> covers what to do when
     the disk fills anyway.
+  </p>
+
+  <h3>Audio storage</h3>
+
+  <p>
+    The <strong>Audio storage</strong> section, just below Options, decides
+    where recordings are kept. The newest days stay on the disk of the computer
+    running Rdio Scanner — set how many with <strong>Keep on local disk</strong>.
+    Turn on <strong>Move older recordings to cloud storage</strong> and, once a
+    night after 3&nbsp;AM, every recording older than that moves to a Backblaze
+    B2 bucket (any S3-compatible bucket works the same way). Each recording is
+    uploaded, checked to be in the bucket whole, and only then removed from the
+    disk. Moved recordings keep playing: a call whose recording is not on the
+    disk is fetched from the bucket when someone plays it, and search is not
+    affected, because the call list never leaves the database.
+  </p>
+
+  <p>
+    Enter the bucket name, its endpoint, and a key ID and application key that
+    can read, write, and delete in the bucket, then press
+    <strong>Test connection</strong> before saving. The application key never
+    comes back to the page once saved; leave its box blank to keep it.
+    <strong>Prune Days</strong> still decides when calls are deleted, and their
+    recordings go with them from wherever they are stored, so Keep on local disk
+    must be fewer days than Prune Days. If the bucket cannot be reached, nothing
+    is lost: the recordings stay on the disk and the move tries again an hour
+    later; the section and the Logs tab say why.
   </p>
 
   <h3>What is not in Options</h3>

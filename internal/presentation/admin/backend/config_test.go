@@ -98,6 +98,10 @@ type adminFixture struct {
 
 	socketRequests []*http.Request
 
+	// audioStorage is the audio storage the audio-storage endpoints answer with; unset, those
+	// endpoints answer as a server keeping its recordings in the database.
+	audioStorage AudioStorage
+
 	routes http.Handler
 }
 
@@ -165,6 +169,7 @@ func (fixture *adminFixture) buildRoutes() http.Handler {
 		Session:              application.NewCheckAdminSessionHandler(fixture.tokens),
 		Version:              captureVersion,
 		Trusted:              trustedLocalhostProxy(),
+		AudioStorage:         fixture.audioStorage,
 	}).Register(mux)
 
 	return mux

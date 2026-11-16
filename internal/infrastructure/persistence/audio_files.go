@@ -16,6 +16,7 @@
 package persistence
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -24,7 +25,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
+
+	"rdio-scanner/internal/infrastructure/cloudstore"
 )
 
 // AudioFiles keeps each call's recording as a file on disk instead of inside
@@ -40,6 +45,22 @@ import (
 // stores them.
 type AudioFiles struct {
 	dir string
+
+	// cloud is the bucket older recordings are moved to, or nil when every
+	// recording stays on the local disk. A recording that is not on the disk is
+	// read from the bucket.
+	cloud atomic.Pointer[cloudstore.Client]
+
+	// days serialises the work done a whole day folder at a time - moving a day
+	// to the bucket, pruning days from either place - so two of them never work
+	// on the same day at once.
+	days sync.Mutex
+
+	// onCloudReadFailure hears about a recording the bucket could not give back.
+	onCloudReadFailure atomic.Pointer[func(rel string, err error)]
+
+	// onCloudPruned hears how much the retention removed from the bucket.
+	onCloudPruned atomic.Pointer[func(files int, bytes int64)]
 }
 
 // NewAudioFiles returns the store for the given folder, or nil for an empty
@@ -168,16 +189,59 @@ func (files *AudioFiles) Write(id uint64, timestamp time.Time, filename, mime st
 	return rel, nil
 }
 
+// cloudReadTimeout bounds how long a listener waits on the bucket for one recording.
+const cloudReadTimeout = 30 * time.Second
+
+// UseCloud sets the bucket older recordings live in, or nil for none.
+func (files *AudioFiles) UseCloud(client *cloudstore.Client) {
+	files.cloud.Store(client)
+}
+
+// Cloud is the bucket in use, or nil.
+func (files *AudioFiles) Cloud() *cloudstore.Client {
+	return files.cloud.Load()
+}
+
+// OnCloudReadFailure sets who hears about a recording the bucket could not give back.
+func (files *AudioFiles) OnCloudReadFailure(report func(rel string, err error)) {
+	files.onCloudReadFailure.Store(&report)
+}
+
 // Read returns the recording stored at a relative path.
 func (files *AudioFiles) Read(rel string) ([]byte, error) {
+	return files.ReadContext(context.Background(), rel)
+}
+
+// ReadContext returns the recording stored at a relative path: from the local disk when
+// it is there, and otherwise from the bucket, where it lives under the same path once it
+// has been moved.
+func (files *AudioFiles) ReadContext(ctx context.Context, rel string) ([]byte, error) {
 	full, err := files.fullPath(rel)
 	if err != nil {
 		return nil, err
 	}
 
 	data, err := os.ReadFile(full)
-	if err != nil {
+	if err == nil {
+		return data, nil
+	}
+
+	cloud := files.cloud.Load()
+
+	if !errors.Is(err, os.ErrNotExist) || cloud == nil {
 		return nil, fmt.Errorf("cannot read audio file %s: %w", full, err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, cloudReadTimeout)
+	defer cancel()
+
+	data, cloudErr := cloud.Get(ctx, rel)
+	if cloudErr != nil {
+		if report := files.onCloudReadFailure.Load(); report != nil {
+			(*report)(rel, cloudErr)
+		}
+
+		return nil, fmt.Errorf("cannot read audio file %s from the disk or from cloud storage: %w", rel, cloudErr)
 	}
 
 	return data, nil

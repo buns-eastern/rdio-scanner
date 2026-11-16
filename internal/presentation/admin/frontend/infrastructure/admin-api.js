@@ -98,6 +98,19 @@ export function createAdminApi({ fetchImpl = globalThis.fetch, storage, onUnauth
       return request('POST', '/logs', options);
     },
 
+    // where recordings are kept: the newest days on the local disk, the rest in a bucket.
+    getAudioStorage() {
+      return request('GET', '/audio-storage');
+    },
+
+    saveAudioStorage(settings) {
+      return request('PUT', '/audio-storage', settings);
+    },
+
+    testAudioStorage(settings) {
+      return request('POST', '/audio-storage/test', settings);
+    },
+
     changePassword(currentPassword, newPassword) {
       return request('POST', '/password', { currentPassword, newPassword });
     },

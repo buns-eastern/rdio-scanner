@@ -88,6 +88,10 @@ type AdminDeps struct {
 	Status *application.GetRuntimeStatusHandler
 
 	Version string
+
+	// AudioStorage is where recordings are kept: the newest days on the local disk, the
+	// rest in a cloud bucket. Nil when the recordings are kept in the database.
+	AudioStorage AudioStorage
 }
 
 // Admin is the administrator's own surface: the endpoints an administrator's page and
@@ -121,6 +125,8 @@ type Admin struct {
 
 	// trusted is the proxy list the operator named, handed down from Deps.
 	trusted *httpaddr.Trusted
+
+	audioStorage AudioStorage
 }
 
 // NewAdmin builds the administrator surface from the use cases it answers with.
@@ -145,6 +151,7 @@ func NewAdmin(deps AdminDeps) *Admin {
 		logs:                 deps.Logs,
 		clock:                deps.Clock,
 		trusted:              deps.Trusted,
+		audioStorage:         deps.AudioStorage,
 	}
 }
 
@@ -155,6 +162,8 @@ func NewAdmin(deps AdminDeps) *Admin {
 // is opened: an upgrade request is handed over before any credential is asked for.
 func (admin *Admin) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/admin/alerts", admin.Alerts)
+	mux.HandleFunc("/api/admin/audio-storage", admin.AudioStorageSettingsEndpoint)
+	mux.HandleFunc("/api/admin/audio-storage/test", admin.AudioStorageTestEndpoint)
 	mux.HandleFunc("/api/admin/config", admin.Config)
 	mux.HandleFunc("/api/admin/config/", admin.Section)
 

@@ -1580,3 +1580,72 @@ rdio-systems-selection .indent {
     outline-offset: 2px;
   }
 }
+
+/* --- audio storage ---------------------------------------------------------------- */
+
+rdio-admin .rdio-admin-card.audio-storage .audio-storage-stats {
+  display: grid;
+  gap: var(--rdio-space-3);
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  margin-bottom: var(--rdio-space-3);
+}
+
+rdio-admin .rdio-admin-card.audio-storage .audio-storage-stat {
+  background: var(--rdio-primary-dark);
+  border: 1px solid var(--rdio-border);
+  border-radius: var(--rdio-radius-row);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+}
+
+rdio-admin .rdio-admin-card.audio-storage .stat-label {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+rdio-admin .rdio-admin-card.audio-storage .audio-storage-stat strong {
+  font-size: 18px;
+  font-weight: 500;
+}
+
+rdio-admin .rdio-admin-card.audio-storage .stat-error,
+rdio-admin .rdio-admin-card.audio-storage .audio-storage-test-result.failed {
+  color: var(--rdio-warn-text);
+  font-size: 13px;
+}
+
+rdio-admin .rdio-admin-card.audio-storage .audio-storage-test-result.ok {
+  color: var(--rdio-accent);
+  font-size: 13px;
+}
+
+rdio-admin .rdio-admin-card.audio-storage .audio-storage-test {
+  align-items: flex-start;
+  display: flex;
+  flex: 0 1 320px;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 200px;
+}
+
+rdio-admin .rdio-admin-card.audio-storage .audio-storage-suffixed {
+  align-items: center;
+  display: flex;
+  flex: 0 1 320px;
+  gap: var(--rdio-space-3);
+  min-width: 200px;
+}
+
+rdio-admin .rdio-admin-card.audio-storage .audio-storage-suffixed rdio-form-field {
+  flex: 0 1 120px;
+  margin: 0;
+}
+
+rdio-admin .rdio-admin-card.audio-storage .audio-storage-note {
+  border-left: 3px solid var(--rdio-border);
+  font-size: 13px;
+  margin: var(--rdio-space-3) 0;
+  padding: 6px 0 6px var(--rdio-space-3);
+}

@@ -19,6 +19,7 @@ import './rdio-admin-talkgroups.js';
 import './rdio-admin-tags.js';
 import './rdio-admin-tools.js';
 import './rdio-admin-units.js';
+import './rdio-admin-audiostorage.js';
 
 // keep SECTIONS in this order: the navigation is ordered by admin work flow, not
 // labels.
@@ -35,6 +36,7 @@ const SECTIONS = [
   { name: 'apikeys', label: 'API Keys', icon: 'key' },
   { name: 'access', label: 'Access', icon: 'vpn_key' },
   { name: 'options', label: 'Options', icon: 'tune' },
+  { name: 'audiostorage', label: 'Audio storage', icon: 'cloud' },
   { name: 'logs', label: 'Logs', icon: 'article' },
   { name: 'tools', label: 'Tools', icon: 'build' },
   { name: 'openapi', label: 'OpenAPI', icon: 'api' },

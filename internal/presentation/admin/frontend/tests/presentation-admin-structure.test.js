@@ -36,6 +36,7 @@ const SECTIONS = [
   { name: 'apikeys', label: 'API Keys' },
   { name: 'access', label: 'Access' },
   { name: 'options', label: 'Options' },
+  { name: 'audiostorage', label: 'Audio storage' },
   { name: 'logs', label: 'Logs' },
   { name: 'tools', label: 'Tools' },
   { name: 'openapi', label: 'OpenAPI' },

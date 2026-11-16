@@ -834,21 +834,22 @@ func navigationSections(t *testing.T) []string {
 
 // The chapter that describes each section the navigation lists.
 var sectionGuideChapters = map[string]string{
-	"Dashboard":   "ch-08-administration-interface",
-	"Systems":     "ch-11-systems-sites-talkgroups-units",
-	"Sites":       "ch-11-systems-sites-talkgroups-units",
-	"Talkgroups":  "ch-11-systems-sites-talkgroups-units",
-	"Units":       "ch-11-systems-sites-talkgroups-units",
-	"Groups":      "ch-12-groups-and-tags",
-	"Tags":        "ch-12-groups-and-tags",
-	"Dirwatch":    "ch-10-getting-audio-in",
-	"Downstreams": "ch-10-getting-audio-in",
-	"API Keys":    "ch-09-access-and-api-keys",
-	"Access":      "ch-09-access-and-api-keys",
-	"Options":     "ch-13-options",
-	"Logs":        "ch-14-logs",
-	"Tools":       "ch-15-tools",
-	"OpenAPI":     "ch-16-rest-api",
+	"Dashboard":     "ch-08-administration-interface",
+	"Systems":       "ch-11-systems-sites-talkgroups-units",
+	"Sites":         "ch-11-systems-sites-talkgroups-units",
+	"Talkgroups":    "ch-11-systems-sites-talkgroups-units",
+	"Units":         "ch-11-systems-sites-talkgroups-units",
+	"Groups":        "ch-12-groups-and-tags",
+	"Tags":          "ch-12-groups-and-tags",
+	"Dirwatch":      "ch-10-getting-audio-in",
+	"Downstreams":   "ch-10-getting-audio-in",
+	"API Keys":      "ch-09-access-and-api-keys",
+	"Access":        "ch-09-access-and-api-keys",
+	"Options":       "ch-13-options",
+	"Audio storage": "ch-13-options",
+	"Logs":          "ch-14-logs",
+	"Tools":         "ch-15-tools",
+	"OpenAPI":       "ch-16-rest-api",
 }
 
 // the log chapter tabulates every subsystem the server files entries under, and the reference
