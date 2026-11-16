@@ -156,6 +156,14 @@ func MigrateWithAudioFiles(ctx context.Context, db *sql.DB, dialect Dialect, clo
 		migrateApikeys,
 		migrateAccesses,
 	} {
+		// A stage can add rows of an earlier stage's table without naming their identity: the
+		// calls stage creates the units a call names that the units stage did not carry. On
+		// PostgreSQL the counter behind that identity has to be past the carried rows before
+		// the stage starts, or the first such row is handed an identity already in use.
+		if err := advanceMigratedSequences(ctx, s); err != nil {
+			return operationError("database", "migrate", err)
+		}
+
 		if err := migrate(ctx, s, progress); err != nil {
 			return operationError("database", "migrate", err)
 		}
@@ -2269,6 +2277,7 @@ func migrateCalls(ctx context.Context, s store, progress Progress) error {
 	}
 
 	arch := archiving(ctx, tx, progress, "rdioScannerCalls", "call", "calls")
+	guard := &callRowGuard{tx: tx, arch: arch, on: s.dialect == DialectPostgresql}
 
 	query = `SELECT "id", "audio", "audioName", "audioType", "dateTime", "frequencies", "frequency", "patches", "source", "sources", "system", "talkgroup" FROM "rdioScannerCalls"`
 
@@ -2332,6 +2341,14 @@ func migrateCalls(ctx context.Context, s store, progress Progress) error {
 
 		if callID.Valid {
 			named = fmt.Sprintf("call %d", callID.Int32)
+		}
+
+		// Every write for this call happens inside its own savepoint on PostgreSQL, so a
+		// statement the database refuses undoes this call alone instead of the whole pass.
+		if err := guard.begin(int64(callID.Int32), named, original); err != nil {
+			tx.rollback()
+
+			return err
 		}
 
 		if !callID.Valid {
@@ -2442,6 +2459,12 @@ func migrateCalls(ctx context.Context, s store, progress Progress) error {
 
 		if _, err := tx.exec(ctx, query, args...); err != nil {
 			reportFailure(progress, part, section, operation, err, query)
+
+			// On PostgreSQL the refused statement has stopped the transaction; the guard rolls this
+			// call back and archives it when the next call begins.
+			if guard.on {
+				continue
+			}
 
 			if err := arch.skip(int64(callID.Int32), named, "the database refused it", original); err != nil {
 				tx.rollback()
@@ -2591,6 +2614,12 @@ func migrateCalls(ctx context.Context, s store, progress Progress) error {
 	}
 
 	rows.Close()
+
+	if err := guard.close(); err != nil {
+		tx.rollback()
+
+		return err
+	}
 
 	arch.report()
 
