@@ -222,7 +222,7 @@ func (upload *Endpoints) answer(w http.ResponseWriter, r *http.Request, key stri
 	case application.UploadCallIncomplete:
 		// The legacy message already ends with a line break and its error
 		// helper adds one, so the uploader reads a blank line after it.
-		upload.fail(w, http.StatusExpectationFailed, fmt.Sprintf("Incomplete call data: %s\n", err.Error()))
+		upload.fail(w, http.StatusExpectationFailed, fmt.Sprintf("Incomplete call data: %s\n", incompleteReason(call, err)))
 
 	case application.UploadCallRefused:
 		// The legacy server answered this refusal in silence; it is now filed
@@ -290,4 +290,18 @@ func (upload *Endpoints) fileTruncation(warning string) {
 		Source:   domain.LogSourceUpload,
 		Message:  warning,
 	})
+}
+
+// incompleteReason is the reason an incomplete upload is answered with. Version 6.6.3 ran
+// every check and answered with the last one that failed, so a post that names no talkgroup
+// was always answered "no talkgroup", whatever else it lacked. SDRTrunk's connection test
+// posts only its key, its system and test=1, and marks the stream connected only when the
+// answer begins "incomplete call data: no talkgroup"; answering with the first failed check
+// ("no audio") left every SDRTrunk stream in error, holding its calls.
+func incompleteReason(call domain.Call, err error) string {
+	if call.Talkgroup.ID == 0 && call.Meta.TalkgroupID == 0 && call.Meta.TalkgroupRef == 0 && call.Meta.TalkgroupLabel == "" {
+		return "no talkgroup"
+	}
+
+	return err.Error()
 }
