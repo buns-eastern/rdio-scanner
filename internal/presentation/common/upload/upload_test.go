@@ -495,7 +495,10 @@ func TestCallUploadEndpointAnswersWhatASubmissionIsMissing(t *testing.T) {
 		t.Fatalf("upload status = %d, want 417: %s", rec.Code, rec.Body.String())
 	}
 
-	if got, want := rec.Body.String(), "Incomplete call data: no audio\n\n"; got != want {
+	// 6.6.3 reported the last check that failed, so a submission naming no talkgroup was
+	// answered "no talkgroup" (server/call.go IsValid at v6.6.3); SDRTrunk's connection test
+	// waits for exactly that answer.
+	if got, want := rec.Body.String(), "Incomplete call data: no talkgroup\n\n"; got != want {
 		t.Errorf("upload answer = %q, want %q: the legacy server's own message already ends with a line break, "+
 			"and its error helper adds one", got, want)
 	}
@@ -510,7 +513,7 @@ func TestCallUploadEndpointAnswersWhatASubmissionIsMissing(t *testing.T) {
 		}
 	}
 
-	if stored != "the upload was refused: Incomplete call data: no audio" {
+	if stored != "the upload was refused: Incomplete call data: no talkgroup" {
 		t.Errorf("stored refusal = %q, want the refusal as one sentence filed with the upload endpoint, "+
 			"without the line break the uploader's answer carries: %v", stored, fixture.logs.Stored)
 	}
