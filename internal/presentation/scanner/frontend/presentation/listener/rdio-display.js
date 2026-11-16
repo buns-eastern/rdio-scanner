@@ -111,7 +111,7 @@ class RdioDisplay extends HTMLElement {
     this.el.stats.textContent = 'E: 0 S: 0 ';
     this.el.unit.textContent = 'UID: 0';
     this.el.progress.textContent = '00:00';
-    this.el.name.textContent = `Rdio Scanner v${version}`;
+    this.el.name.textContent = splashName(version);
 
     this.el.authForm.addEventListener('submit', (ev) => {
       ev.preventDefault();
@@ -332,7 +332,7 @@ class RdioDisplay extends HTMLElement {
     } else if (!this.lastCall) {
       // the last call's rows stay on screen after it ends; only the
       // pristine idle state shows the version line.
-      this.write(this.el.name, `Rdio Scanner v${version}`);
+      this.write(this.el.name, splashName(version));
     }
 
     // the flags evaluate from the current call or the last call on
@@ -426,3 +426,10 @@ class RdioDisplay extends HTMLElement {
 }
 
 customElements.define('rdio-display', RdioDisplay);
+
+// splashName is the line the idle display shows: the release without its build
+// metadata (the +g commit suffix an untagged build carries), marked as this
+// fork's build (BE: PostgreSQL, recordings kept as files).
+function splashName(version) {
+  return `Rdio Scanner v${String(version).split('+')[0]} (BE)`;
+}
