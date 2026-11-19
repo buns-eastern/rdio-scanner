@@ -1258,7 +1258,11 @@ func TestServerKeepsTheSigningSecretItPutOnRecord(t *testing.T) {
 	first := startedTestServerIn(t, baseDir)
 
 	secret := storedSecret(t, first.db)
-	rows := countRows(t, first.db, `SELECT COUNT(*) FROM "options"`)
+	// The live listener snapshot is rewritten while the server runs, so it is not part of what the
+	// signing secret could have duplicated.
+	const optionRows = `SELECT COUNT(*) FROM "options" WHERE "key" <> 'liveListeners'`
+
+	rows := countRows(t, first.db, optionRows)
 
 	if len(secret) != domain.SecretLength {
 		t.Fatalf("the first start left a %d-character secret on record, want %d", len(secret), domain.SecretLength)
@@ -1273,7 +1277,7 @@ func TestServerKeepsTheSigningSecretItPutOnRecord(t *testing.T) {
 			"wrote: a new key kills every session the old one signed")
 	}
 
-	if got := countRows(t, second.db, `SELECT COUNT(*) FROM "options"`); got != rows {
+	if got := countRows(t, second.db, optionRows); got != rows {
 		t.Errorf("the options table has %d rows after the second start, want the %d the first start left: a "+
 			"secret that is already on record is left there", got, rows)
 	}

@@ -79,6 +79,10 @@ type Server struct {
 	// night, when the operator turns it on; nil when the recordings stay in the database.
 	audioStorage *persistence.AudioStorage
 
+	// liveListeners writes the listeners the hub holds to the database every few seconds, for
+	// status pages outside the server.
+	liveListeners *persistence.LiveListeners
+
 	// dbLock is the claim this process holds on the deployment while its
 	// database is open. It is taken before the database is opened and
 	// released after the database is closed, so nothing else can open the
@@ -454,6 +458,19 @@ func (s *Server) wire(migrationLines []domain.LogEntry) error {
 	s.listeners = hub
 	s.listenerCounts = debouncer
 
+	if s.db != nil {
+		s.liveListeners = persistence.NewLiveListeners(s.db, s.dialect, func() []persistence.LiveListener {
+			infos := hub.ListenerSnapshot()
+			list := make([]persistence.LiveListener, len(infos))
+
+			for i, info := range infos {
+				list[i] = persistence.LiveListener{Ident: info.Ident, Address: info.Address, Since: info.Since, LastSeen: info.LastSeen, Live: info.Live}
+			}
+
+			return list
+		})
+	}
+
 	tokensAdapter := tokens.New(optionsSecrets{options: options})
 
 	ingest := application.NewIngestCallHandler(
@@ -714,6 +731,10 @@ func (s *Server) Start(ctx context.Context) error {
 		s.audioStorage.Start()
 	}
 
+	if s.liveListeners != nil {
+		s.liveListeners.Start()
+	}
+
 	watches, err := s.repos.Dirwatches.AllDirwatches(ctx)
 	if err != nil {
 		return err
@@ -797,6 +818,10 @@ func (s *Server) stop(ctx context.Context) {
 
 		if s.audioStorage != nil {
 			s.audioStorage.Stop()
+		}
+
+		if s.liveListeners != nil {
+			s.liveListeners.Stop(shuttingDown)
 		}
 
 		if s.held != nil {

@@ -620,6 +620,36 @@ func (hub *Hub) AccessSessionCount(accessID uint64) uint {
 }
 
 // ListenerCount reports how many listeners the server is counting.
+// ListenerInfo is one listener as a status page shows it.
+type ListenerInfo struct {
+	Ident    string
+	Address  string
+	Since    time.Time
+	LastSeen time.Time
+	Live     bool
+}
+
+// ListenerSnapshot lists the listeners the hub is counting: the very sessions ListenerCount
+// counts, so the list and the count every listener is told can never disagree.
+func (hub *Hub) ListenerSnapshot() []ListenerInfo {
+	hub.mutex.Lock()
+	defer hub.mutex.Unlock()
+
+	list := make([]ListenerInfo, 0, len(hub.listens))
+
+	for _, session := range hub.listens {
+		list = append(list, ListenerInfo{
+			Ident:    session.access.Ident,
+			Address:  session.remoteAddr,
+			Since:    session.since,
+			LastSeen: time.UnixMilli(session.lastSeen.Load()),
+			Live:     !session.livefeed.AllOff(),
+		})
+	}
+
+	return list
+}
+
 func (hub *Hub) ListenerCount() int {
 	hub.mutex.Lock()
 	defer hub.mutex.Unlock()
@@ -810,12 +840,20 @@ type listener struct {
 	// registered belongs to the writer alone: it is the writer that notices the first configuration it
 	// is being asked to write, and it is the only thing that ever looks at this.
 	registered bool
+
+	// since is when the connection was taken over, and lastSeen (Unix milliseconds) the last time
+	// the listener answered a ping or sent a frame. Together they tell a listener who is really
+	// there from a connection nobody is behind any more.
+	since    time.Time
+	lastSeen atomic.Int64
 }
 
 func newListener(hub *Hub, id string, conn *websocket.Conn, remoteAddr string) *listener {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	return &listener{
+	now := hub.clock.Now()
+
+	session := &listener{
 		cancel:     cancel,
 		conn:       conn,
 		ctx:        ctx,
@@ -826,7 +864,12 @@ func newListener(hub *Hub, id string, conn *websocket.Conn, remoteAddr string) *
 		quit:       make(chan struct{}),
 		remoteAddr: remoteAddr,
 		send:       make(chan delivery, sendBuffer),
+		since:      now,
 	}
+
+	session.lastSeen.Store(now.UnixMilli())
+
+	return session
 }
 
 // read takes the frames a session sends, in order, and hands each to
@@ -844,6 +887,8 @@ func (session *listener) read(dispatch Dispatch) {
 	}
 
 	session.conn.SetPongHandler(func(string) error {
+		session.lastSeen.Store(session.hub.clock.Now().UnixMilli())
+
 		return session.conn.SetReadDeadline(time.Now().Add(session.hub.pongWait))
 	})
 
@@ -852,6 +897,8 @@ func (session *listener) read(dispatch Dispatch) {
 		if err != nil {
 			return
 		}
+
+		session.lastSeen.Store(session.hub.clock.Now().UnixMilli())
 
 		message, err := ReadMessage(b)
 		if err != nil {

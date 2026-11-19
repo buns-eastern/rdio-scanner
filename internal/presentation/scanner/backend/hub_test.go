@@ -70,6 +70,28 @@ func TestAListenerIsCountedOnlyOnceItsConfigurationHasBeenWritten(t *testing.T) 
 	}
 }
 
+// The snapshot a status page reads lists exactly the sessions the count counts: none before the
+// configuration is written, then the listener with where it came from and when it was last heard.
+func TestTheListenerSnapshotListsWhatTheCountCounts(t *testing.T) {
+	f := newFixture(t, openSettings)
+
+	if got := f.hub.ListenerSnapshot(); len(got) != 0 {
+		t.Fatalf("snapshot = %+v with nothing registered, want empty", got)
+	}
+
+	f.register(t, f.id)
+
+	got := f.hub.ListenerSnapshot()
+
+	if len(got) != f.hub.ListenerCount() || len(got) != 1 {
+		t.Fatalf("snapshot = %+v, count %d, want one listener matching the count", got, f.hub.ListenerCount())
+	}
+
+	if got[0].Address != "203.0.113.7:41000" || !got[0].Since.Equal(hubClockTime) || got[0].LastSeen.Before(hubClockTime) || got[0].Live {
+		t.Errorf("listener = %+v, want its address, taken over and last seen at the hub clock, live feed off", got[0])
+	}
+}
+
 // A listener that unlocked an access code is joined by the identity it unlocked, and one that did not
 // is joined by address alone.
 func TestAListenerThatUnlockedAnAccessIsNamedByIt(t *testing.T) {
